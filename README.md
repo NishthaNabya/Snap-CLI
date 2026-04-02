@@ -1,47 +1,40 @@
-# Snap
+# snap
 
-> State-aware checkpoints for AI-agent workflows.
+State-aware checkpoints for AI coding agents (and humans).
 
-When you (or an AI agent) rewind your git history to an older commit, your codebase changes, but your external state (databases, `.env` files, local caches) stays exactly where it was. This mismatch creates **Agentic Drift** — your code expects one reality, but your system state reflects another.
+Ever used an AI coding agent, let it run for a while, realized it messed up, and ran `git checkout HEAD~5` to revert the code? If you have, you probably noticed that while your code reverted, your database and your `.env` file didn't. 
 
-**Snap** solves this by directly intercepting Git hooks to provide automatic, invisible state synchronization tied directly to your Git commit hash.
+Now your code expects one thing, but your database is in the future. We call this "Agentic Drift", and it's super annoying to debug. 
 
----
+Snap fixes this. It quietly hooks into Git so that whenever you change branches or checkout an old commit, it automatically restores your local databases and config files to match exactly how they were at that specific commit.
 
-## 🧠 How it Works
+## How it works
 
-Snap operates on a single truth: **The Git Commit Hash dictates the entire system constraints.**
+The philosophy is simple: the Git commit hash should be the single source of truth for your entire system.
 
-1. You run `git commit`. 
-2. Snap's `post-commit` hook triggers automatically.
-3. Snap executes its **Driver Registry** (e.g., SQLite, Dotenv) to capture your system state.
-4. Binary state is streamed into a **Content-Addressable Store (CAS)** using bounded memory buffers.
-5. You run `git checkout HEAD~1`.
-6. Snap's `post-checkout` hook intercepts the checkout.
-7. Snap instantly queries the CAS and overwrites your databases and configs with the exact binary blobs associated with that older commit.
+When you initialize Snap in a repository, it drops a small script into your native Git hooks:
+- When you run `git commit`, Snap quietly streams your state (like a local SQLite DB or an env file) into a hidden content-addressable store (`.snap/objects`).
+- When you run `git checkout`, Snap grabs the data associated with that checkout and puts it right back where it belongs.
 
----
+We wrote this in pure Go with zero CGO dependencies (so it cross-compiles everywhere). The backing store does zero-cost deduplication, meaning if your database didn't actually change between commits, we don't duplicate the storage. We also stream everything through a tiny 32KB buffer, so it uses practically zero RAM even if you are tracking massive gigabyte-level databases.
 
-## 🛠 Installation
+## Installation
+
+You just need Go installed on your machine. Run:
 
 ```bash
-# Install the CLI directly to your Go bin
 go install github.com/NishthaNabya/snap/cmd/snap@latest
 ```
 
----
+## Quick start
 
-## 🚀 Quick Start
-
-### 1. Initialization
-Navigate to any git repository and initialize Snap. This creates the hidden `.snap/` storage engine and safely installs chaining Git hooks.
+Go to any existing git repository and run:
 
 ```bash
 snap init
 ```
 
-### 2. Configuration
-Tell Snap what state you want to bind to your git history by creating `.snap/config.json`. We use a **Priority Loading** architecture, meaning Environment drivers will always restore *before* Database drivers.
+This creates a `.snap/config.json` file. Edit it to tell Snap what files to track. For example, if you want local environments and a sqlite database tracked:
 
 ```json
 {
@@ -52,41 +45,25 @@ Tell Snap what state you want to bind to your git history by creating `.snap/con
     },
     {
       "driver": "sqlite",
-      "source": "local.db"
+      "source": "database.sqlite"
     }
   ]
 }
 ```
 
-### 3. See the Magic
-From here on out, Snap is invisible. Just use Git.
+That's literally it. You don't need to learn any new CLI commands. Just use Git like you always do.
 
 ```bash
-# Make some State Changes
-echo "SECRET_KEY=123" > .env
-sqlite3 local.db "CREATE TABLE users (id int);"
+# Make a change to your env
+echo "SECRET=123" > .env
+git add .env
+git commit -m "added a secret"
+# (Snap quietly backed up your .env in the background)
 
-# A standard commit (Snap captures the state silently in the background!)
-git add .env local.db
-git commit -m "Added users table and secret key"
+# Change it again
+echo "SECRET=456" > .env
+git commit -am "changed the secret"
 
-# Nuke the database and change the env
-echo "SECRET_KEY=ABC" > .env
-sqlite3 local.db "DROP TABLE users;"
-git commit -am "Destroyed everything"
-
-# Rewind Git. Snap intercepts and restores your DB and .env to the previous state.
+# Watch Snap automatically revert your .env file on disk!
 git checkout HEAD~1
 ```
-
----
-
-## ⚙️ Core Architecture Details
-
-* **Zero-Cost Deduplication:** Blobs are stored in `.snap/objects/` and named by their SHA-256 digest. If your database hasn't changed between commits, Snap stores 0 new bytes.
-* **Atomic Writes:** All filesystem mutations follow a strict `TempWrite -> fsync -> Rename` POSIX pipeline. It is impossible to achieve a partially corrupted state during a crash or power loss.
-* **Bounded I/O:** Snap uses `io.TeeReader` and 32KB buffer limits for all hashing and streaming. It can capture and restore 50GB database blobs while consuming virtually 0MB of RAM.
-* **Idempotent Restoration:** If a restore fails midway entirely (e.g., you `kill -9` the process), you simply run `snap restore <hash>` again. 
-
----
-*Built to eliminate friction in Agentic Coding.*
