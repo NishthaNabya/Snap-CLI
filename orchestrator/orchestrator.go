@@ -129,9 +129,10 @@ func (o *Orchestrator) Save(ctx context.Context, force bool) error {
 	var saveErrors []string
 
 	for _, rd := range resolved {
+		absSource := o.resolveSource(rd.Source)
 		fmt.Fprintf(os.Stderr, "snap: capturing %s (%s)\n", rd.Source, rd.Driver.Name())
 
-		rc, meta, err := rd.Driver.Capture(ctx, rd.Source)
+		rc, meta, err := rd.Driver.Capture(ctx, absSource)
 		if err != nil {
 			if isNotFound(err) {
 				fmt.Fprintf(os.Stderr, "snap: warning: skipping %s (file not found)\n", rd.Source)
@@ -189,13 +190,15 @@ func (o *Orchestrator) Restore(ctx context.Context, gitHash string) error {
 	}
 	defer lk.Release()
 
-	// Step 2: Load manifest.
+	// Step 2: Check if a manifest exists for this commit.
+	// This avoids cross-platform file-open errors entirely.
+	if !o.manifMgr.Exists(gitHash) {
+		fmt.Fprintf(os.Stderr, "snap: no snapshot for %s (this is normal for commits made before snap init)\n", gitHash[:12])
+		return nil
+	}
+
 	mf, err := o.manifMgr.Load(gitHash)
 	if err != nil {
-		if isNotFound(err) {
-			fmt.Fprintf(os.Stderr, "snap: warning: no snapshot for commit %s\n", gitHash[:12])
-			return nil
-		}
 		return err
 	}
 
@@ -227,6 +230,8 @@ func (o *Orchestrator) Restore(ctx context.Context, gitHash string) error {
 
 		fmt.Fprintf(os.Stderr, "snap: restoring %s (%s)\n", rd.Source, rd.Driver.Name())
 
+		absSource := o.resolveSource(rd.Source)
+
 		// Verify blob integrity before restoring.
 		ok, err := o.store.Verify(entry.BlobHash)
 		if err != nil {
@@ -245,7 +250,7 @@ func (o *Orchestrator) Restore(ctx context.Context, gitHash string) error {
 			continue
 		}
 
-		if err := rd.Driver.Restore(ctx, rd.Source, rc); err != nil {
+		if err := rd.Driver.Restore(ctx, absSource, rc); err != nil {
 			rc.Close()
 			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: %v", rd.Source, err))
 			continue
@@ -345,4 +350,14 @@ func isNotFound(err error) bool {
 	}
 	s := err.Error()
 	return strings.Contains(s, "no such file or directory") || strings.Contains(s, "The system cannot find the file specified")
+}
+
+// resolveSource converts a relative config source path to an absolute
+// path rooted at the repository root. If the path is already absolute,
+// it is returned as-is.
+func (o *Orchestrator) resolveSource(source string) string {
+	if filepath.IsAbs(source) {
+		return source
+	}
+	return filepath.Join(o.root, source)
 }
