@@ -104,6 +104,17 @@ This creates a `.snap/config.json` file. Edit it to tell Snap what files to trac
 }
 ```
 
+> [!WARNING]
+> **CRITICAL SECURITY NOTE:** Because Snap stores copies of your `.env` files and databases locally, you **MUST** add the storage directories to your `.gitignore` file. If you don't, you will accidentally push your secret API keys to GitHub!
+>
+> Add this to your `.gitignore`:
+> ```text
+> .snap/objects/
+> .snap/ledgers/
+> .snap/snap.lock
+> ```
+> *(Note: It is perfectly safe to commit `.snap/config.json` so your team shares the same config!)*
+
 That's literally it. You don't need to learn any new CLI commands. Just use Git like you always do.
 
 ```bash
