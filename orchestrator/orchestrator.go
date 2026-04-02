@@ -125,20 +125,23 @@ func (o *Orchestrator) Save(ctx context.Context, force bool) error {
 
 	// Step 5: Capture each source in priority order.
 	mf := manifest.New(gitHash)
+	var saveErrors []string
 
 	for _, rd := range resolved {
 		fmt.Fprintf(os.Stderr, "snap: capturing %s (%s)\n", rd.Source, rd.Driver.Name())
 
 		rc, meta, err := rd.Driver.Capture(ctx, rd.Source)
 		if err != nil {
-			return fmt.Errorf("snap: capture %s: %w", rd.Source, err)
+			saveErrors = append(saveErrors, fmt.Sprintf("%s: %v", rd.Source, err))
+			continue // Prevent one missing file from aborting the whole save
 		}
 
 		// Step 6: Stream to CAS (hash-while-writing).
 		blobHash, blobSize, err := o.store.Put(rc)
 		rc.Close()
 		if err != nil {
-			return fmt.Errorf("snap: store %s: %w", rd.Source, err)
+			saveErrors = append(saveErrors, fmt.Sprintf("%s: store error: %v", rd.Source, err))
+			continue
 		}
 
 		if o.store.Has(blobHash) {
@@ -154,11 +157,20 @@ func (o *Orchestrator) Save(ctx context.Context, force bool) error {
 	if err := mf.Seal(); err != nil {
 		return fmt.Errorf("snap: seal manifest: %w", err)
 	}
-	if err := o.manifMgr.Write(mf); err != nil {
-		return fmt.Errorf("snap: write manifest: %w", err)
+	
+	// Only persist the manifest if we successfully captured at least one file
+	if len(mf.Entries) > 0 {
+		if err := o.manifMgr.Write(mf); err != nil {
+			return fmt.Errorf("snap: write manifest: %w", err)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "snap: saved state for %s (%d entries)\n", gitHash[:12], len(mf.Entries))
+	
+	if len(saveErrors) > 0 {
+		return fmt.Errorf("partial save failure:\n  %s", strings.Join(saveErrors, "\n  "))
+	}
+	
 	return nil
 }
 
