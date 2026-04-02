@@ -58,7 +58,9 @@ I wrote this in pure Go with zero CGO dependencies (so it cross-compiles everywh
 
 ## What it actually works with
 
-Right now, Snap is built specifically for **local development environments**. I built it to make my own life easier when working with AI coding agents, so I prioritized the tools I actually use on my laptop:
+Right now, Snap is built specifically for **local development environments**. The entire reason Snap exists is strictly for files that you cannot or should not track with Git natively (like secrets or giant binary databases). 
+
+Because of this, you should NOT use Snap to track source code (`.ts`, `.py`, `.go`). Git already handles those perfectly! I built Snap to act as Git's sidekick, handling the heavy local files that it purposefully ignores:
 
 * **.env files**: Fully supported. Snap captures them perfectly.
 * **SQLite databases**: Fully supported for local dev. Right now Snap uses a blazing-fast file-copy mechanism under the hood. It takes a perfect snapshot of your `.sqlite` or `.db` file in milliseconds and streams it to the storage engine. (Just don't try to use it on a live production SQLite database that is taking 5,000 requests a second, it's not meant for that!).
